@@ -1,0 +1,14 @@
+name: Multiverse-WorldReset
+author: basicmark
+description: A periodic world reset plugin for MultiVerse
+main: io.github.basicmark.MultiverseWorldReset.MultiverseWorldReset
+startup: postworld
+url: https://github.com/basicmark/Multiverse-WorldReset
+depend: ['Multiverse-Core']
+softdepend: []
+version: 1.0
+api-version: 1.13
+commands:
+    mvwr:
+        description: Type /mvwr ? for more info
+        usage: /mvwr ?

@@ -185,6 +185,10 @@ public class WorldManager {
         }
     }
 
+    public Date getLastReset() {
+        return lastReset;
+    }
+
     public String getWorldName() {
         return worldName;
     }

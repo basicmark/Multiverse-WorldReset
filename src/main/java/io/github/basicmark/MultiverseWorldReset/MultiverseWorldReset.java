@@ -2,6 +2,8 @@ package io.github.basicmark.MultiverseWorldReset;
 
 
 
+import java.io.File;
+import java.io.IOException;
 import java.util.*;
 import java.util.logging.Level;
 
@@ -14,22 +16,29 @@ import com.pneumaticraft.commandhandler.multiverse.CommandHandler;
 import io.github.basicmark.MultiverseWorldReset.commands.*;
 
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.World;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
 public class MultiverseWorldReset extends JavaPlugin implements MVPlugin, Listener {
-    /* FIXME: When a world is regenerated a new MVWorld is created, use work name or UUID instead */
 	private Map<String, WorldManager> worldManagers;
 	private Map<WorldManager, Date> nextNotification;
     private BukkitTask timer;
+
+    private File playersWorldFile = null;
+    private FileConfiguration playersWorld = null;
+    ConfigurationSection playersLastWorld = null;
 
     private final static int requiresProtocol = 19;
     private MultiverseCore core;
@@ -70,6 +79,60 @@ public class MultiverseWorldReset extends JavaPlugin implements MVPlugin, Listen
             lastResetInfoFormat = config.getString("lastresetifoformat", lastResetInfoFormat);
             nextResetInfoFormat = config.getString("nextresetinfoformat", nextResetInfoFormat);
         }
+    }
+
+    private void loadLastPlayerWorld() {
+        // Load the players last known world
+        playersWorldFile = new File(getDataFolder(), "playersworld.yml");
+        playersWorld = YamlConfiguration.loadConfiguration(playersWorldFile);
+        playersLastWorld = playersWorld.getConfigurationSection("lastWorld");
+
+        if (playersLastWorld == null) {
+            // No world history section so this must be the first time this plug-in has been run.
+            // Create the section and add any players that are already on-line into it
+            playersWorld.createSection("lastWorld");
+
+            for(Player player : getServer().getOnlinePlayers()) {
+                playersWorld.set("lastWorld." + player.getUniqueId().toString(), player.getWorld().getName());
+            }
+
+            try {
+                playersWorld.save(playersWorldFile);
+            } catch (IOException ex) {
+                getLogger().severe("Could not save config to " + playersWorldFile);
+            }
+            playersLastWorld = playersWorld.getConfigurationSection("lastWorld");
+        }
+    }
+
+    private void saveLastPlayerWorld(Player player, String worldName) {
+        if (worldName != null) {
+            playersWorld.set("lastWorld." + player.getUniqueId().toString(), worldName);
+
+            try {
+                playersWorld.save(playersWorldFile);
+            } catch (IOException ex) {
+                getLogger().severe("Could not save config to " + playersWorldFile);
+            }
+        }
+    }
+
+    private void relocatePlayerIfRequried(Player player, String worldName) {
+        WorldManager manager = worldManagers.get(worldName);
+        if (manager == null) {
+            return;
+        }
+
+        if ((manager.getLastReset() == null) || (manager.getLastReset().getTime() < player.getLastPlayed())) {
+            return;
+        }
+
+        relocatePlayer(player);
+    }
+
+    private void relocatePlayer(Player player) {
+        player.performCommand("spawn");
+        player.sendMessage(ChatColor.translateAlternateColorCodes('&',"&4You have been teleported to spawn as the world you logged out in has been reset!"));
     }
 
 	public void onEnable() {
@@ -117,6 +180,9 @@ public class MultiverseWorldReset extends JavaPlugin implements MVPlugin, Listen
         saveDefaultConfig();
         reloadConfig();
 
+        // Load the last world a player was known to have been in */
+        loadLastPlayerWorld();
+
         timer = Bukkit.getScheduler().runTaskTimer(this, new Runnable() {
             @Override
             public void run() {
@@ -132,6 +198,9 @@ public class MultiverseWorldReset extends JavaPlugin implements MVPlugin, Listen
                     /* First check if the world is due for a reset */
                     calendar.setTime(resetDate);
                     if (date.after(calendar.getTime())) {
+                        for (Player player : getServer().getWorld(manager.getWorldName()).getPlayers()) {
+                            relocatePlayer(player);
+                        }
                         manager.forceReset();
                         /* Remove the next update time to force a broadcast now */
                         nextNotification.remove(manager);
@@ -266,6 +335,17 @@ public class MultiverseWorldReset extends JavaPlugin implements MVPlugin, Listen
             WorldManager manager = worldManagers.get(worldName);
             player.sendMessage(manager.getNextResetString(worldEnterFormat));
         }
+        saveLastPlayerWorld(player, worldName);
+    }
+
+    @EventHandler
+    public void onPlayerJoinEvent (PlayerJoinEvent event) {
+        Player player = event.getPlayer();
+        /* If this is the first time a player logged in after this plugin was installed set their last world */
+        String lastWorld = playersLastWorld.getString(player.getUniqueId().toString(), null);
+        if (lastWorld == null) {
+            saveLastPlayerWorld(player, player.getWorld().getName());
+        }
+        relocatePlayerIfRequried(player, lastWorld);
     }
 }
-
